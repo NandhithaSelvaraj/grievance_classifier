@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Track Your Complaint</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    background: #f4f5f7;
+    margin: 0;
+    padding: 40px 20px;
+    color: #1a1a1a;
+    display: flex;
+    justify-content: center;
+  }
+  .container {
+    width: 100%;
+    max-width: 560px;
+  }
+  h1 {
+    font-size: 22px;
+    margin-bottom: 4px;
+    text-align: center;
+  }
+  .subtitle {
+    color: #666;
+    margin-bottom: 28px;
+    font-size: 14px;
+    text-align: center;
+  }
+  .search-box {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  input {
+    flex: 1;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 1px solid #d0d0d0;
+    font-size: 14px;
+  }
+  button {
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: none;
+    background: #2563eb;
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { background: #1d4ed8; }
+  button:disabled { background: #93b4ec; cursor: not-allowed; }
+
+  .card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    margin-bottom: 14px;
+  }
+
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 14px;
+  }
+
+  .complaint-text {
+    font-size: 14px;
+    font-weight: 600;
+    max-width: 75%;
+  }
+
+  .status-badge {
+    display: inline-block;
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .status-badge.Pending { background: #fef3c7; color: #92400e; }
+  .status-badge.In-Progress { background: #dbeafe; color: #1e40af; }
+  .status-badge.Resolved { background: #d1fae5; color: #065f46; }
+
+  .progress {
+    display: flex;
+    justify-content: space-between;
+    margin: 18px 0 6px;
+    position: relative;
+  }
+  .progress::before {
+    content: "";
+    position: absolute;
+    top: 11px;
+    left: 11px;
+    right: 11px;
+    height: 3px;
+    background: #eee;
+    z-index: 0;
+  }
+  .step {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    flex: 1;
+  }
+  .dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #eee;
+    color: #999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .step.active .dot { background: #2563eb; color: white; }
+  .step.done .dot { background: #16a34a; color: white; }
+  .step-label { font-size: 10px; color: #888; text-align: center; }
+
+  .meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #888;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #f0f0f0;
+  }
+  .meta span:last-child { text-align: right; }
+
+  .message {
+    text-align: center;
+    padding: 24px;
+    color: #888;
+    font-size: 14px;
+    display: none;
+  }
+  .message.show { display: block; }
+  .message.error { color: #b91c1c; }
+
+  .helper {
+    text-align: center;
+    font-size: 12px;
+    color: #999;
+    margin-top: 16px;
+  }
+
+  .results-label {
+    font-size: 13px;
+    color: #888;
+    margin-bottom: 12px;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>📍 Track Your Complaint</h1>
+  <div class="subtitle">Enter your registered contact number to see all your complaints</div>
+
+  <div class="search-box">
+    <input type="text" id="contactInput" placeholder="e.g. 9999999999" />
+    <button id="trackBtn">Track</button>
+  </div>
+
+  <div class="message" id="message"></div>
+  <div class="results-label" id="resultsLabel" style="display:none;"></div>
+  <div id="results"></div>
+
+  <div class="helper">Use the same contact number you gave when submitting your complaint.</div>
+</div>
+
+<script>
+  // Change this if your backend runs on a different host/port
+  const API_BASE = "http://127.0.0.1:8000";
+
+  const input = document.getElementById("contactInput");
+  const trackBtn = document.getElementById("trackBtn");
+  const message = document.getElementById("message");
+  const resultsLabel = document.getElementById("resultsLabel");
+  const results = document.getElementById("results");
+
+  function showMessage(text, isError = false) {
+    message.textContent = text;
+    message.className = "message show" + (isError ? " error" : "");
+    results.innerHTML = "";
+    resultsLabel.style.display = "none";
+  }
+
+  function clearMessage() {
+    message.className = "message";
+  }
+
+  function formatDate(iso) {
+    if (!iso) return "-";
+    const d = new Date(iso);
+    return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function progressSteps(status) {
+    const stepsDone = {
+      "Pending": ["Pending"],
+      "In Progress": ["Pending", "In Progress"],
+      "Resolved": ["Pending", "In Progress", "Resolved"],
+    }[status] || [];
+
+    const all = ["Pending", "In Progress", "Resolved"];
+    return all.map((label, idx) => {
+      const isDone = stepsDone.includes(label);
+      const isActive = label === stepsDone[stepsDone.length - 1];
+      const cls = isActive ? "step active" : isDone ? "step done" : "step";
+      return `
+        <div class="${cls}">
+          <div class="dot">${idx + 1}</div>
+          <div class="step-label">${label}</div>
+        </div>`;
+    }).join("");
+  }
+
+  function renderCard(c) {
+    return `
+      <div class="card">
+        <div class="card-top">
+          <div class="complaint-text">${c.translated_text || c.original_text || "-"}</div>
+          <span class="status-badge ${c.status.replace(" ", "-")}">${c.status}</span>
+        </div>
+        <div class="progress">${progressSteps(c.status)}</div>
+        <div class="meta">
+          <span>Category: ${c.category || "-"}<br/>Dept: ${c.department || "-"}</span>
+          <span>Submitted: ${formatDate(c.created_at)}<br/>Updated: ${formatDate(c.updated_at)}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  async function trackComplaints() {
+    const contact = input.value.trim();
+    if (!contact) {
+      showMessage("Please enter your contact number.", true);
+      return;
+    }
+
+    trackBtn.disabled = true;
+    trackBtn.textContent = "Loading...";
+    clearMessage();
+
+    try {
+      const res = await fetch(`${API_BASE}/complaints/by-contact/${encodeURIComponent(contact)}`);
+
+      if (res.status === 404) {
+        showMessage("No complaints found for this contact number. Please check and try again.", true);
+        return;
+      }
+      if (!res.ok) throw new Error("Request failed");
+
+      const complaints = await res.json();
+
+      resultsLabel.style.display = "block";
+      resultsLabel.textContent = `Found ${complaints.length} complaint${complaints.length > 1 ? "s" : ""}`;
+      results.innerHTML = complaints.map(renderCard).join("");
+      clearMessage();
+    } catch (err) {
+      showMessage(`⚠️ Could not reach the server at ${API_BASE}. Is the backend running?`, true);
+    } finally {
+      trackBtn.disabled = false;
+      trackBtn.textContent = "Track";
+    }
+  }
+
+  trackBtn.addEventListener("click", trackComplaints);
+  input.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") trackComplaints();
+  });
+</script>
+
+</body>
+</html>
