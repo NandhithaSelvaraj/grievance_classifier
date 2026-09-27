@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice Complaint</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #f4f6f8;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+    margin: 0;
+  }
+  h1 {
+    font-size: 22px;
+    text-align: center;
+    color: #222;
+  }
+  #micButton {
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    border: none;
+    background: #d32f2f;
+    color: white;
+    font-size: 60px;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  #micButton.recording {
+    background: #b71c1c;
+    transform: scale(1.08);
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(211,47,47,0.5); }
+    70% { box-shadow: 0 0 0 25px rgba(211,47,47,0); }
+    100% { box-shadow: 0 0 0 0 rgba(211,47,47,0); }
+  }
+  #status {
+    margin-top: 24px;
+    font-size: 18px;
+    text-align: center;
+    min-height: 28px;
+    color: #333;
+  }
+  #result {
+    margin-top: 20px;
+    max-width: 500px;
+    background: white;
+    border-radius: 10px;
+    padding: 16px 20px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    display: none;
+  }
+  #result h3 { margin-top: 0; font-size: 15px; color: #555; }
+  #result p { font-size: 17px; color: #111; margin: 6px 0; }
+  .label { font-weight: bold; color: #666; }
+</style>
+</head>
+<body>
+
+<h1>Tap the button and speak your complaint</h1>
+
+<button id="micButton">🎤</button>
+
+<div id="status">Tap to start recording</div>
+
+<div id="result">
+  <h3>Your complaint (auto-detected)</h3>
+  <p><span class="label">Language:</span> <span id="lang"></span></p>
+  <p><span class="label">English:</span> <span id="translated"></span></p>
+</div>
+
+<script>
+// CHANGE THIS to your server's address once you know it
+// (localhost while testing on the same machine; your laptop's
+// IP address, e.g. http://192.168.1.x:8000, when testing from a phone
+// on the same WiFi network)
+const SERVER_URL = "http://127.0.0.1:8000/process-complaint";
+
+const micButton = document.getElementById("micButton");
+const statusEl = document.getElementById("status");
+const resultEl = document.getElementById("result");
+const langEl = document.getElementById("lang");
+const translatedEl = document.getElementById("translated");
+
+let mediaRecorder;
+let audioChunks = [];
+let isRecording = false;
+
+micButton.addEventListener("click", async () => {
+  console.log("Button clicked. isRecording =", isRecording);
+  if (!isRecording) {
+    // Start recording
+    try {
+      console.log("Requesting microphone access...");
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log("Microphone access granted.");
+      mediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        console.log("Audio chunk received, size:", e.data.size);
+        audioChunks.push(e.data);
+      };
+      mediaRecorder.onstop = () => {
+        console.log("Recording stopped, chunks collected:", audioChunks.length);
+        submitRecording();
+      };
+
+      mediaRecorder.start();
+      console.log("Recording started. MediaRecorder state:", mediaRecorder.state);
+      isRecording = true;
+      micButton.classList.add("recording");
+      statusEl.textContent = "Recording... tap again to stop";
+      resultEl.style.display = "none";
+    } catch (err) {
+      statusEl.textContent = "Microphone access denied or unavailable.";
+      console.error("getUserMedia error:", err);
+    }
+  } else {
+    // Stop recording
+    console.log("Stopping recording. MediaRecorder state before stop:", mediaRecorder.state);
+    mediaRecorder.stop();
+    isRecording = false;
+    micButton.classList.remove("recording");
+    statusEl.textContent = "Processing your complaint...";
+  }
+});
+
+async function submitRecording() {
+  console.log("submitRecording() called. Number of chunks:", audioChunks.length);
+  const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+  console.log("Blob created, size:", audioBlob.size, "bytes");
+  const formData = new FormData();
+  formData.append("audio", audioBlob, "complaint.webm");
+
+  try {
+    console.log("Sending request to:", SERVER_URL);
+    const response = await fetch(SERVER_URL, {
+      method: "POST",
+      body: formData,
+    });
+    console.log("Response received. Status:", response.status);
+    const data = await response.json();
+    console.log("Response JSON:", data);
+
+    if (data.error) {
+      statusEl.textContent = "Error: " + data.error;
+      resultEl.style.display = "none";
+      return;
+    }
+
+    langEl.textContent = data.detected_language || "unknown";
+    translatedEl.textContent = data.translated_text || "(no text detected)";
+    resultEl.style.display = "block";
+    statusEl.textContent = "Complaint submitted. Tap to record another.";
+  } catch (err) {
+    statusEl.textContent = "Could not reach the server. Check your connection.";
+    console.error("Fetch error:", err);
+  }
+}
+</script>
+
+</body>
+</html>
